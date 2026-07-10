@@ -185,13 +185,17 @@ except Exception as exc:
 
 def draw_emoji(frame, gesture_name, center_x, center_y):
     """Draws the emoji for a gesture ('Rock'/'Paper'/'Scissors') centered
-    at (center_x, center_y). Falls back to a plain text label if the
-    Windows emoji font isn't available on this machine."""
+    at (center_x, center_y). Falls back to a plain, properly centered text
+    label if the Windows emoji font isn't available on this machine."""
     emoji_char = EMOJI_MAP[gesture_name]
 
     if not EMOJI_FONT_AVAILABLE:
-        cv2.putText(frame, gesture_name.upper(), (center_x - 90, center_y),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1.3, (0, 255, 255), 3)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        scale, thickness = 0.7, 2
+        text = gesture_name.upper()
+        (text_w, text_h), _ = cv2.getTextSize(text, font, scale, thickness)
+        origin = (center_x - text_w // 2, center_y + text_h // 2)
+        cv2.putText(frame, text, origin, font, scale, (0, 255, 255), thickness, cv2.LINE_AA)
         return frame
 
     img_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
@@ -201,6 +205,14 @@ def draw_emoji(frame, gesture_name, center_x, center_y):
     position = (center_x - text_w // 2, center_y - text_h // 2)
     draw.text(position, emoji_char, font=emoji_font, embedded_color=True)
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+
+
+def draw_emoji_box(frame, gesture_name, x1, y1, x2, y2):
+    """Draws a bordered box and places the gesture's emoji centered inside it."""
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (40, 40, 40), -1)   # background fill
+    cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 255), 2)  # border
+    center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
+    return draw_emoji(frame, gesture_name, center_x, center_y)
 
 
 def draw_bold_centered_text(frame, text, center_x, center_y, color, scale=2.2, thickness=6):
@@ -315,16 +327,23 @@ while True:
 
     elif state == "RESULT":
         if system_choice is not None:
-            frame = draw_emoji(frame, system_choice, w // 2, h // 2 - 60)
+            box_margin = 20
+            box_size = 190
+            box_x2 = w - box_margin
+            box_x1 = box_x2 - box_size
+            box_y1 = box_margin
+            box_y2 = box_y1 + box_size
+            frame = draw_emoji_box(frame, system_choice, box_x1, box_y1, box_x2, box_y2)
+
         cv2.putText(frame, result_text, (20, h - 80),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
 
         if outcome == "You Win!":
-            frame = draw_bold_centered_text(frame, "WIN", w // 2, h // 2 + 70, (0, 255, 0))
+            frame = draw_bold_centered_text(frame, "WIN", w // 2, h // 2, (0, 255, 0))
         elif outcome == "System Wins!":
-            frame = draw_bold_centered_text(frame, "LOSE", w // 2, h // 2 + 70, (0, 0, 255))
+            frame = draw_bold_centered_text(frame, "LOSE", w // 2, h // 2, (0, 0, 255))
         elif outcome == "Tie!":
-            frame = draw_bold_centered_text(frame, "TIE", w // 2, h // 2 + 70, (0, 255, 255))
+            frame = draw_bold_centered_text(frame, "TIE", w // 2, h // 2, (0, 255, 255))
 
         if now - state_start_time >= RESULT_DISPLAY_DURATION:
             state = "IDLE"
