@@ -5,9 +5,10 @@ Flow:
 1. Press ENTER to start a round.
 2. Stay silent for 1 second (no sound, no reveal yet).
 3. Play "rock-paper-scissor-shoot.wav" once (~1 second).
-4. The instant the audio finishes, the system reveals its random pick as
-   an emoji (rock / paper / scissors), and your current hand gesture is
-   captured and compared against it.
+4. Right after the audio finishes, the system locks in its random pick
+   and gives you a short window (about 1 second) to show your gesture -
+   like the real "rock, paper, scissors... shoot!" moment. Your gesture
+   is captured at the end of that window, not the instant the audio ends.
 5. If you win: play "system-fad-denge.wav". If you lose: play the
    fah....wav sound. Ties and unclear gestures play no sound.
 6. Result stays on screen for a few seconds, then it's ready for the next
@@ -171,7 +172,7 @@ def play_sound(path):
 # cannot draw emoji glyphs)
 # ---------------------------------------------------------------------
 
-EMOJI_MAP = {"Rock": "🪨", "Paper": "📃", "Scissors": "✂️"}
+EMOJI_MAP = {"Rock": "✊", "Paper": "🖐️", "Scissors": "✌️"}
 
 EMOJI_FONT_PATH = "C:/Windows/Fonts/seguiemj.ttf"
 try:
@@ -202,12 +203,24 @@ def draw_emoji(frame, gesture_name, center_x, center_y):
     return cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
 
 
+def draw_bold_centered_text(frame, text, center_x, center_y, color, scale=2.2, thickness=6):
+    """Draws large, bold, centered text. OpenCV has no true 'bold' font
+    weight, so boldness is faked with a thick stroke, which reads as bold
+    at this size."""
+    font = cv2.FONT_HERSHEY_DUPLEX
+    (text_w, text_h), _ = cv2.getTextSize(text, font, scale, thickness)
+    origin = (center_x - text_w // 2, center_y + text_h // 2)
+    cv2.putText(frame, text, origin, font, scale, color, thickness, cv2.LINE_AA)
+    return frame
+
+
 # ---------------------------------------------------------------------
 # Game loop
 # ---------------------------------------------------------------------
 
 COUNTDOWN_DURATION = 1.0       # silent pause after ENTER, before audio
 AUDIO_DURATION = 1.0           # length of rock-paper-scissor-shoot.wav
+CAPTURE_DURATION = 1.0         # window AFTER audio ends to show your gesture
 RESULT_DISPLAY_DURATION = 3.0  # how long the result stays on screen
 
 hand_landmarker = create_hand_landmarker()
@@ -216,10 +229,11 @@ cap = cv2.VideoCapture(0)
 player_score = 0
 system_score = 0
 
-state = "IDLE"          # IDLE -> COUNTDOWN -> AUDIO -> RESULT -> IDLE
+state = "IDLE"          # IDLE -> COUNTDOWN -> AUDIO -> CAPTURE -> RESULT -> IDLE
 state_start_time = 0.0
 system_choice = None
 captured_gesture = None
+outcome = None
 result_text = ""
 
 current_gesture = "No hand detected"
@@ -264,13 +278,27 @@ while True:
         cv2.putText(frame, "Rock, Paper, Scissors, Shoot!", (20, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
         if now - state_start_time >= AUDIO_DURATION:
-            # Reveal moment: lock in the system's random pick and whatever
-            # gesture the player is showing right now.
+            # Audio just finished - the system's random pick is locked in
+            # now, but the PLAYER gets a short window (below) to actually
+            # show their gesture, instead of being judged on a single frame.
             system_choice = random.choice(["Rock", "Paper", "Scissors"])
+            state = "CAPTURE"
+            state_start_time = now
+
+    elif state == "CAPTURE":
+        cv2.putText(frame, "Show your gesture NOW!", (20, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
+        cv2.putText(frame, f"Seeing: {current_gesture}", (20, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
+        if now - state_start_time >= CAPTURE_DURATION:
+            # Capture whatever gesture is being held at the end of the
+            # window - this gives real reaction time after "shoot" instead
+            # of demanding the hand already be in position beforehand.
             captured_gesture = current_gesture
 
             if captured_gesture not in ["Rock", "Paper", "Scissors"]:
                 result_text = "Couldn't see your hand clearly - try again!"
+                outcome = None
             else:
                 outcome = decide_winner(captured_gesture, system_choice)
                 result_text = f"You: {captured_gesture}  |  System: {system_choice}  ->  {outcome}"
@@ -287,9 +315,17 @@ while True:
 
     elif state == "RESULT":
         if system_choice is not None:
-            frame = draw_emoji(frame, system_choice, w // 2, h // 2 - 30)
+            frame = draw_emoji(frame, system_choice, w // 2, h // 2 - 60)
         cv2.putText(frame, result_text, (20, h - 80),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0), 2)
+
+        if outcome == "You Win!":
+            frame = draw_bold_centered_text(frame, "WIN", w // 2, h // 2 + 70, (0, 255, 0))
+        elif outcome == "System Wins!":
+            frame = draw_bold_centered_text(frame, "LOSE", w // 2, h // 2 + 70, (0, 0, 255))
+        elif outcome == "Tie!":
+            frame = draw_bold_centered_text(frame, "TIE", w // 2, h // 2 + 70, (0, 255, 255))
+
         if now - state_start_time >= RESULT_DISPLAY_DURATION:
             state = "IDLE"
 
